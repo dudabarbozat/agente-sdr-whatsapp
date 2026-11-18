@@ -1,0 +1,15 @@
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+
+# Exportações do n8n com dados de execução
+*.execution.json
+
+# Sistema operacional e editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+*.log

@@ -1,0 +1,580 @@
+{
+  "name": "Agente SDR - Nutrição Agendada",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "dfa640a6-58d2-4dda-921e-473afa2f873b",
+      "name": "Trigger 30min"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "dados_cliente",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "nurturing_step",
+              "condition": "neq",
+              "keyValue": "0"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ],
+      "id": "8c08e838-ee22-4cdd-a32e-2aa59d9a06d6",
+      "name": "Get Leads Nurturing",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "credencial-supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        480,
+        0
+      ],
+      "id": "4c4daee3-b6a3-442b-839b-39a06043a633",
+      "name": "Loop Leads"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst step = parseInt(item.json.nurturing_step) || 0;\nconst enrolledAt = new Date(item.json.nurturing_enrolled_at);\nconst now = new Date();\nconst hoursElapsed = (now - enrolledAt) / (1000 * 60 * 60);\n\nlet shouldSend = false;\nlet windowExpired = false;\n\n// Pula se humano assumiu o atendimento\nif (item.json.atendimento_ia === 'pause') {\n  windowExpired = true;\n} else if (isNaN(enrolledAt.getTime()) || step === 0) {\n  windowExpired = true;\n} else if (hoursElapsed >= 23) {\n  windowExpired = true;\n} else {\n  if (step === 1 && hoursElapsed >= 3) shouldSend = true;\n  if (step === 2 && hoursElapsed >= 10) shouldSend = true;\n  if (step === 3 && hoursElapsed >= 21) shouldSend = true;\n}\n\nreturn [{ json: { ...item.json, shouldSend, windowExpired, hoursElapsed: Math.round(hoursElapsed * 10) / 10, currentStep: step } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "id": "c96dda86-f72f-47ee-9565-f12dbbe019da",
+      "name": "Check Timing"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "exp-check-001",
+              "leftValue": "={{ $json.windowExpired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ],
+      "id": "48825bce-02cc-4462-9f74-8b4432221fab",
+      "name": "IF Window Expired"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "dados_cliente",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefone }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "nurturing_step",
+              "fieldValue": "0"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        -160
+      ],
+      "id": "f78cf08d-bdc7-4d2d-bb75-07b1e453cdd9",
+      "name": "Reset Expired",
+      "credentials": {
+        "supabaseApi": {
+          "id": "credencial-supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "send-check-001",
+              "leftValue": "={{ $json.shouldSend }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        160
+      ],
+      "id": "0cd72dd4-79a0-4bdb-995c-119961ae6f57",
+      "name": "IF Should Send"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "chat_messages",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "phone",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Timing').first().json.telefone }}"
+            },
+            {
+              "keyName": "active",
+              "condition": "eq",
+              "keyValue": "true"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        80
+      ],
+      "id": "de0fc041-06a6-4330-af44-f1ac3b484e89",
+      "name": "Get History",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "credencial-supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "conversas",
+        "include": "specifiedFields",
+        "fieldsToInclude": "created_at,nomewpp,bot_message,user_message",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        80
+      ],
+      "id": "0fbcb6b6-f736-405b-8b5c-09ba3dddbd1c",
+      "name": "Aggregate History"
+    },
+    {
+      "parameters": {
+        "jsCode": "const conversas = $json.conversas || [];\nconst leadData = $('Check Timing').first().json;\n\nconst texto = conversas\n  .slice(-8)\n  .map(c => {\n    const nome = c.nomewpp || 'Lead';\n    const user = c.user_message ? `${nome}: ${c.user_message}` : '';\n    const bot = c.bot_message ? `Lia: ${c.bot_message}` : '';\n    return [user, bot].filter(Boolean).join('\\n');\n  })\n  .filter(Boolean)\n  .join('\\n\\n');\n\nreturn [{ json: {\n  texto_conversa: texto || 'Sem histórico disponível.',\n  step: leadData.currentStep,\n  telefone: leadData.telefone,\n  nomewpp: conversas[0]?.nomewpp || 'Lead'\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        80
+      ],
+      "id": "a119f71a-19e4-439c-bbe4-80aae5dff578",
+      "name": "Format History"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_conversa }}",
+        "options": {
+          "systemMessage": "=Você é a Lia, assistente de atendimento da Imobiliária Exemplo.\n\nVocê está fazendo um follow-up via WhatsApp com um lead que não respondeu. O nome do lead no WhatsApp é: {{ $json.nomewpp }}.\n\nSTEP ATUAL: {{ $json.step }} de 3\n\nINSTRUÇÕES POR STEP:\n\nStep 1 — Tom leve e natural. Reabra a conversa sem pressão, como quem retoma um papo. Máximo 250 caracteres.\nExemplo de tom: \"Oi! Vi que ficamos por aqui. Fica à vontade pra retomar quando quiser...\"\n\nStep 2 — Ofereça valor. Use o que o lead mencionou (tipo de imóvel, região, dúvida) para indicar um conteúdo. Escolha o link mais adequado:\n- Guia do comprador: https://www.exemplo.com.br/guia-do-comprador\n- Blog: https://www.exemplo.com.br/blog\nMáximo 400 caracteres.\n\nStep 3 — Última mensagem. Respeitosa e direta. Reconheça que pode não ser o momento e deixe a porta aberta. Máximo 250 caracteres.\nExemplo de tom: \"Não quero ser insistente! Se um dia fizer sentido conversar sobre imóveis, estou por aqui.\"\n\nREGRAS INEGOCIÁVEIS:\n- Nunca mencione que é automático, bot ou follow-up programado\n- Nunca repita informações já ditas na conversa\n- Nunca invente dados do lead\n- Escreva SOMENTE o texto da mensagem, sem aspas, sem prefixo, sem explicação\n- Emojis com moderação (máximo 2)\n- Nunca use '**' para negrito, apenas '*'\n- Substitua 'Prazer' por 'feliz em conhecer'"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        2160,
+        80
+      ],
+      "id": "eb5a05d2-d4ec-454f-848c-046c85123e97",
+      "name": "Generate Followup"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        240
+      ],
+      "id": "1099f1be-42ac-4e1b-aaba-97fbba836484",
+      "name": "OpenAI Nurturing",
+      "credentials": {
+        "openAiApi": {
+          "id": "credencial-openai",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendText",
+        "textMessage": "={{ $json.output }}",
+        "botId": "={{ $env.WTS_BOT_ID }}",
+        "departmentId": "={{ $env.WTS_DEPARTAMENTO_ID }}",
+        "userIdByDepartment": "={{ $env.WTS_USUARIO_ID }}",
+        "channelId": "={{ $env.WTS_CANAL_ID }}",
+        "numberToSend": "={{ $('Check Timing').first().json.telefone }}",
+        "synchronousMessage": true
+      },
+      "type": "n8n-nodes-wts.wtsChat",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        80
+      ],
+      "id": "62e965a5-1a37-4de4-a24d-daadf088c2d4",
+      "name": "Send Nurturing WTS",
+      "credentials": {
+        "wtsApi": {
+          "id": "credencial-wts",
+          "name": "WTS Chat (WhatsApp)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        80
+      ],
+      "id": "0bc78555-7c59-4de4-8075-cf1c6fd795d7",
+      "name": "Wait 2s"
+    },
+    {
+      "parameters": {
+        "jsCode": "const currentStep = $('Check Timing').first().json.currentStep;\nconst nextStep = currentStep >= 3 ? 0 : currentStep + 1;\nreturn [{ json: { telefone: $('Check Timing').first().json.telefone, nextStep } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        80
+      ],
+      "id": "dd93725e-e51f-41db-91ba-33307abe7564",
+      "name": "Compute Next Step"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "dados_cliente",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefone }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "nurturing_step",
+              "fieldValue": "={{ $json.nextStep }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        80
+      ],
+      "id": "b9e247f6-d295-437d-aa27-5906aad126c7",
+      "name": "Update Step",
+      "credentials": {
+        "supabaseApi": {
+          "id": "credencial-supabase",
+          "name": "Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Trigger 30min": {
+      "main": [
+        [
+          {
+            "node": "Get Leads Nurturing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Leads Nurturing": {
+      "main": [
+        [
+          {
+            "node": "Loop Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Leads": {
+      "main": [
+        [
+          {
+            "node": "Check Timing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Check Timing": {
+      "main": [
+        [
+          {
+            "node": "IF Window Expired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Window Expired": {
+      "main": [
+        [
+          {
+            "node": "Reset Expired",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Should Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset Expired": {
+      "main": [
+        [
+          {
+            "node": "Loop Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Should Send": {
+      "main": [
+        [
+          {
+            "node": "Get History",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get History": {
+      "main": [
+        [
+          {
+            "node": "Aggregate History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate History": {
+      "main": [
+        [
+          {
+            "node": "Format History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format History": {
+      "main": [
+        [
+          {
+            "node": "Generate Followup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Nurturing": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Followup",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Followup": {
+      "main": [
+        [
+          {
+            "node": "Send Nurturing WTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Nurturing WTS": {
+      "main": [
+        [
+          {
+            "node": "Wait 2s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2s": {
+      "main": [
+        [
+          {
+            "node": "Compute Next Step",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Next Step": {
+      "main": [
+        [
+          {
+            "node": "Update Step",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Step": {
+      "main": [
+        [
+          {
+            "node": "Loop Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

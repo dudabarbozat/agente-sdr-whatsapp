@@ -1,0 +1,548 @@
+{
+  "name": "Agente SDR - Reenvio Manual ao CRM",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        4016,
+        3104
+      ],
+      "id": "63c00e8d-a782-4de4-88e2-9ff17d1f82a1",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "dados_cliente",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "atendimento_ia",
+              "condition": "neq",
+              "keyValue": "pause"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4256,
+        3104
+      ],
+      "id": "b205db16-5af2-4995-96b7-1f87dc2cbf59",
+      "name": "Busca Leads Supabase",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "credencial-supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        4496,
+        3104
+      ],
+      "id": "56ab972b-5be5-4962-bf50-f2d3181e4c22",
+      "name": "Loop Leads"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "tel-set-001",
+              "name": "Telefone",
+              "value": "={{ $json.telefone }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4736,
+        3104
+      ],
+      "id": "2a5bf3ca-25ee-4139-baae-d10c811eaa47",
+      "name": "Set Telefone"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "dados_cliente",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $('Set Telefone').first().json.Telefone }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "atendimento_ia",
+              "fieldValue": "pause"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4976,
+        3104
+      ],
+      "id": "96fb91a2-307f-4303-b671-04bcc36085ab",
+      "name": "Pausar IA2",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "credencial-supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "chat_messages",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "phone",
+              "condition": "eq",
+              "keyValue": "={{ $('Set Telefone').first().json.Telefone }}"
+            },
+            {
+              "keyName": "active",
+              "condition": "eq",
+              "keyValue": "true"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        5216,
+        3104
+      ],
+      "id": "105fe3fa-45fe-4a19-86b9-8b267bed5dfd",
+      "name": "ListMessages-Supabase",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "credencial-supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "conversas",
+        "include": "specifiedFields",
+        "fieldsToInclude": "id,created_at,phone,email,nomewpp,bot_message,user_message,message_type",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        5456,
+        3104
+      ],
+      "id": "468cb62e-54bb-4213-9601-da1ed67f3562",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const conversas = item.json.conversas || [];\n  if (!Array.isArray(conversas)) throw new Error(\"A propriedade 'conversas' não é um array.\");\n  let phone = '';\n  let email = '';\n  let nomewpp = 'sem nome';\n  for (const conversa of conversas) {\n    if (conversa.phone && !phone) phone = conversa.phone;\n    if (conversa.email && !email) email = conversa.email;\n    if (conversa.nomewpp && nomewpp === 'sem nome') nomewpp = conversa.nomewpp;\n  }\n  const textoUnico = conversas.map(conversa => {\n    const cliente = conversa.user_message || \"sem mensagem do usuário\";\n    const agente = conversa.bot_message || \"sem resposta do chatbot\";\n    const dataOriginal = conversa.created_at || \"Data indisponível\";\n    const dataFormatada = dataOriginal !== \"Data indisponível\" ? formatarData(dataOriginal) : dataOriginal;\n    return `em: ${dataFormatada}\\n\\n- agente(chatbot): ${agente}\\n- cliente(${conversa.nomewpp || nomewpp}): ${cliente}\\n`;\n  }).join('\\n\\n');\n  return { json: { texto: textoUnico, phone: phone || $('Set Telefone').first().json.Telefone, email: email, nomewpp: nomewpp, conversas_count: conversas.length, has_phone: !!phone, has_email: !!email, first_user_message: conversas[0]?.user_message || 'Nenhuma', first_bot_message: conversas[0]?.bot_message || 'Nenhuma' }, pairedItem: item };\n});\nfunction formatarData(dataString) {\n  try {\n    const data = new Date(dataString);\n    if (isNaN(data.getTime())) return \"Data inválida\";\n    const dia = String(data.getDate()).padStart(2, '0');\n    const mes = String(data.getMonth() + 1).padStart(2, '0');\n    const ano = data.getFullYear();\n    const horas = String(data.getHours()).padStart(2, '0');\n    const minutos = String(data.getMinutes()).padStart(2, '0');\n    return `${dia}/${mes}/${ano} ${horas}:${minutos}`;\n  } catch (error) { return \"Data inválida\"; }\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5696,
+        3104
+      ],
+      "id": "39016cbc-fea7-4c80-a387-e46dff017561",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analise a conversa abaixo entre o agente (Lia) e o cliente.\n\nSua tarefa:\n1. Extraia as seguintes informações quando presentes na conversa:\n   - Nome completo do cliente\n   - Interesse (comprar, alugar ou anunciar imóvel)\n   - Tipo de imóvel (casa, apartamento, terreno, sala comercial etc.)\n   - Região ou bairro de interesse\n   - Faixa de valor ou orçamento\n   - Email (se mencionado)\n   - Telefone: {{ $('Set Telefone').first().json.Telefone }}\n2. Escreva um resumo conciso (2-3 frases) do que o cliente procura e de qualquer restrição mencionada (prazo, financiamento, garantia).\n3. Retorne APENAS os dados estruturados solicitados, sem comentários adicionais.\n\nSe uma informação não estiver presente na conversa, retorne string vazia para aquele campo.\n\nConversa:\n{{ $json.texto }}",
+        "hasOutputParser": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        5904,
+        3104
+      ],
+      "id": "dcb92185-a304-4c52-a1f4-ce822d646c74",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        5888,
+        3296
+      ],
+      "id": "ca35610c-f687-4ed0-82c0-9ab4aca45c31",
+      "name": "OpenAI Chat Model3",
+      "credentials": {
+        "openAiApi": {
+          "id": "credencial-openai",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"nome\": \"string\",\n  \"interesse\": \"string\",\n  \"tipo_imovel\": \"string\",\n  \"regiao\": \"string\",\n  \"faixa_valor\": \"string\",\n  \"email\": \"string\",\n  \"telefone\": \"string\",\n  \"resumo_conversa\": \"string\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        6096,
+        3296
+      ],
+      "id": "a5e3ec85-fe0f-4f19-b90e-497589496319",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b086e07b-5ee6-430e-8334-eac3d0055ec7",
+              "name": "nome",
+              "value": "={{ $json.output.nome }}",
+              "type": "string"
+            },
+            {
+              "id": "5731b1bf-c693-46fe-a7ba-99ecc3a13f6d",
+              "name": "interesse",
+              "value": "={{ $json.output.interesse }}",
+              "type": "string"
+            },
+            {
+              "id": "509f488a-525e-4891-916e-94b8888f979f",
+              "name": "tipo_imovel",
+              "value": "={{ $json.output.tipo_imovel }}",
+              "type": "string"
+            },
+            {
+              "id": "48ec5d7a-7f8b-40a4-8947-bd8d33375c6c",
+              "name": "regiao",
+              "value": "={{ $json.output.regiao }}",
+              "type": "string"
+            },
+            {
+              "id": "c7d9a0ee-9cf2-453c-b653-ffdba3336262",
+              "name": "faixa_valor",
+              "value": "={{ $json.output.faixa_valor }}",
+              "type": "string"
+            },
+            {
+              "id": "6db257a1-c33e-4968-adb2-4f5e21c25913",
+              "name": "telefone",
+              "value": "={{ $('Code').item.json.phone }}",
+              "type": "string"
+            },
+            {
+              "id": "98c89b8e-9191-4531-a639-87796d8c820e",
+              "name": "email",
+              "value": "={{ $json.output.email || $('Code').item.json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "fb0bf049-e17d-43b3-98c7-5fb32f2204dc",
+              "name": "resumo_conversa",
+              "value": "={{ $json.output.resumo_conversa }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6176,
+        3104
+      ],
+      "id": "07589cf2-994e-4f5d-8260-8f4eee1fd6bf",
+      "name": "Dados lead1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "dados_cliente",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $('Set Telefone').first().json.Telefone }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "nome",
+              "fieldValue": "={{ $json.nome }}"
+            },
+            {
+              "fieldId": "interesse",
+              "fieldValue": "={{ $json.interesse }}"
+            },
+            {
+              "fieldId": "tipo_imovel",
+              "fieldValue": "={{ $json.tipo_imovel }}"
+            },
+            {
+              "fieldId": "regiao",
+              "fieldValue": "={{ $json.regiao }}"
+            },
+            {
+              "fieldId": "faixa_valor",
+              "fieldValue": "={{ $json.faixa_valor }}"
+            },
+            {
+              "fieldId": "email",
+              "fieldValue": "={{ $json.email }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        6416,
+        3104
+      ],
+      "id": "f737f465-3698-4bd3-bd23-8e8a9b17ba28",
+      "name": "Atualiza Dados Cliente1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "credencial-supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_LEADS_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"external_id\": {{ JSON.stringify($('Dados lead1').item.json.telefone || '') }},\n  \"titulo\": {{ JSON.stringify('Lead WhatsApp - ' + ($('Dados lead1').item.json.nome || 'sem nome')) }},\n  \"nome\": {{ JSON.stringify($('Dados lead1').item.json.nome || '') }},\n  \"email\": {{ JSON.stringify($('Dados lead1').item.json.email || '') }},\n  \"telefone\": {{ JSON.stringify($('Dados lead1').item.json.telefone || '') }},\n  \"interesse\": {{ JSON.stringify($('Dados lead1').item.json.interesse || '') }},\n  \"tipo_imovel\": {{ JSON.stringify($('Dados lead1').item.json.tipo_imovel || '') }},\n  \"regiao\": {{ JSON.stringify($('Dados lead1').item.json.regiao || '') }},\n  \"faixa_valor\": {{ JSON.stringify($('Dados lead1').item.json.faixa_valor || '') }},\n  \"observacoes\": {{ JSON.stringify('Resumo da conversa: ' + ($('Dados lead1').item.json.resumo_conversa || '')) }},\n  \"origem\": \"whatsapp-agente-sdr\",\n  \"tags\": [\"WhatsApp\", \"Agente-IA\"]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6656,
+        3104
+      ],
+      "id": "52bd56eb-1002-4a6a-a43e-48fdc1ba3b56",
+      "name": "Enviar Lead ao CRM",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "credencial-crm",
+          "name": "CRM (Header Auth)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Busca Leads Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca Leads Supabase": {
+      "main": [
+        [
+          {
+            "node": "Loop Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Leads": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Set Telefone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Telefone": {
+      "main": [
+        [
+          {
+            "node": "Pausar IA2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pausar IA2": {
+      "main": [
+        [
+          {
+            "node": "ListMessages-Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ListMessages-Supabase": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Dados lead1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados lead1": {
+      "main": [
+        [
+          {
+            "node": "Atualiza Dados Cliente1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Dados Cliente1": {
+      "main": [
+        [
+          {
+            "node": "Enviar Lead ao CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Lead ao CRM": {
+      "main": [
+        [
+          {
+            "node": "Loop Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
