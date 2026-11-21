@@ -157,3 +157,17 @@ Ver `supabase/schema.sql`.
 | `dados_cliente` | Atendimento, encaminhamento, nutrição, reenvio | Todos |
 | `n8n_chat_histories` | Memória do agente, mensagens com IA pausada | Agente atendente |
 | `documents` | Ingestão | Agente RAG |
+
+## Decisões de design e limites
+
+- **Transbordo para humano.** O agente não fecha negócio nem informa preço. No encaminhamento a sessão é transferida no provedor e a IA fica pausada até o atendente escrever "Atendimento finalizado". Toda mensagem do humano pausa a IA, então assumir a conversa não exige nenhuma ação extra.
+- **Gatilho por frase fixa.** Simples e auditável, mas acoplado ao prompt: mudar a mensagem de encerramento exige mudar o `Switch2`.
+- **Debounce por comparação.** Duas leituras do Redis com 10 s de intervalo; se a lista mudou, a execução desiste e a mais recente responde. Acrescenta até 10 s de latência em troca de uma resposta por ideia.
+- **Mensagens em blocos.** Respostas longas são divididas em blocos de 300 a 500 caracteres com formatação nativa do WhatsApp e enviadas com 1 s de intervalo.
+- **Busca separada da conversa.** O agente RAG só devolve trecho literal ou vazio; reduz invenção e mantém o prompt do atendente estável.
+- **Reconstrução total da base.** Adequada a bases pequenas. Para volume maior, trocar por ingestão incremental.
+- **JSON do CRM montado com `JSON.stringify`.** Aspas e quebras de linha no resumo da conversa não quebram o corpo da requisição.
+- **Mídia.** Os nós de áudio e imagem leem base64 do payload do webhook. O formato desse campo depende do provedor de WhatsApp e precisa ser conferido na integração.
+- **Rota de treino.** O `Switch` de entrada usa a primeira regra que casar; a regra do prefixo de treino vem depois da rota normal. Ajuste a ordem e restrinja o remetente ao número administrativo antes de usar em produção.
+- **Sem testes automatizados** dos workflows; a validação é feita pela revisão diária e por execução manual no n8n.
+
